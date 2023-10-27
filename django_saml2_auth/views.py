@@ -123,69 +123,17 @@ def acs(request: HttpRequest):
             })
 
     is_new_user, target_user = get_or_create_user(user)
-
-    before_login_trigger = dictor(saml2_auth_settings, "TRIGGER.BEFORE_LOGIN")
-    if before_login_trigger:
-        run_hook(before_login_trigger, user)  # type: ignore
+    token_creator = dictor(saml2_auth_settings, "TOKEN_CREATOR")
+    token = run_hook(token_creator,target_user)
 
     request.session.flush()
 
-    use_jwt = dictor(saml2_auth_settings, "USE_JWT", False)
-    if use_jwt and target_user.is_active:
-        # Create a new JWT token for IdP-initiated login (acs)
-        jwt_token = create_custom_or_default_jwt(target_user)
-        custom_token_query_trigger = dictor(saml2_auth_settings, "TRIGGER.CUSTOM_TOKEN_QUERY")
-        if custom_token_query_trigger:
-            query = run_hook(custom_token_query_trigger, jwt_token)
-        else:
-            query = f"?token={jwt_token}"
+    query = f"?token={token}&email={target_user.email}&id={target_user.account_user.id}"
 
-        # Use JWT auth to send token to frontend
-        frontend_url = dictor(saml2_auth_settings, "FRONTEND_URL", next_url)
+    # Use JWT auth to send token to frontend
+    frontend_url = dictor(saml2_auth_settings, "FRONTEND_URL", next_url)
 
-        return HttpResponseRedirect(frontend_url + query)
-
-    if target_user.is_active:
-        # Try to load from the `AUTHENTICATION_BACKENDS` setting in settings.py
-        if hasattr(settings, "AUTHENTICATION_BACKENDS") and settings.AUTHENTICATION_BACKENDS:
-            model_backend = settings.AUTHENTICATION_BACKENDS[0]
-        else:
-            model_backend = "django.contrib.auth.backends.ModelBackend"
-
-        login(request, target_user, model_backend)
-
-        after_login_trigger = dictor(saml2_auth_settings, "TRIGGER.AFTER_LOGIN")
-        if after_login_trigger:
-            run_hook(after_login_trigger, request.session, user)  # type: ignore
-    else:
-        raise SAMLAuthError("The target user is inactive.", extra={
-            "exc_type": Exception,
-            "error_code": INACTIVE_USER,
-            "reason": "User is inactive.",
-            "status_code": 500
-        })
-
-    def redirect(redirect_url: Optional[str] = None) -> HttpResponseRedirect:
-        """Redirect to the redirect_url or the root page.
-
-        Args:
-            redirect_url (str, optional): Redirect URL. Defaults to None.
-
-        Returns:
-            HttpResponseRedirect: Redirect to the redirect_url or the root page.
-        """
-        if redirect_url:
-            return HttpResponseRedirect(redirect_url)
-        else:
-            return HttpResponseRedirect("/")
-
-    if is_new_user:
-        try:
-            return render(request, "django_saml2_auth/welcome.html", {"user": request.user})
-        except TemplateDoesNotExist:
-            return redirect(next_url)
-    else:
-        return redirect(next_url)
+    return HttpResponseRedirect(frontend_url + query)
 
 
 @exception_handler

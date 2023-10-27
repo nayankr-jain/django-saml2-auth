@@ -119,12 +119,9 @@ def get_or_create_user(user: Dict[str, Any]) -> Tuple[bool, User]:
                     "reason": "Cannot create user. Missing user_id.",
                     "status_code": 400
                 })
-            target_user = create_new_user(user_id, user["first_name"], user["last_name"])
 
             create_user_trigger = dictor(saml2_auth_settings, "TRIGGER.CREATE_USER")
-            if create_user_trigger:
-                run_hook(create_user_trigger, user)  # type: ignore
-
+            target_user = run_hook(create_user_trigger, user)  # type: ignore
             target_user.refresh_from_db()
             created = True
         else:
@@ -134,30 +131,6 @@ def get_or_create_user(user: Dict[str, Any]) -> Tuple[bool, User]:
                 "reason": "Due to current config, a new user should not be created.",
                 "status_code": 500
             })
-
-    # Optionally update this user's group assignments by updating group memberships from SAML groups
-    # to Django equivalents
-    group_attribute = dictor(saml2_auth_settings, "ATTRIBUTES_MAP.groups")
-    group_map = dictor(saml2_auth_settings, "GROUPS_MAP")
-
-    if group_attribute and group_attribute in user["user_identity"]:
-        groups = []
-
-        for group_name in user["user_identity"][group_attribute]:
-            # Group names can optionally be mapped to different names in Django
-            if group_map and group_name in group_map:
-                group_name_django = group_map[group_name]
-            else:
-                group_name_django = group_name
-
-            try:
-                groups.append(Group.objects.get(name=group_name_django))
-            except Group.DoesNotExist:
-                should_create_new_groups = dictor(saml2_auth_settings, "CREATE_GROUPS", False)
-                if should_create_new_groups:
-                    groups.append(Group.objects.create(name=group_name_django))
-
-        target_user.groups.set(groups)
 
     return (created, target_user)
 
