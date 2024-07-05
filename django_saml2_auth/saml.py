@@ -159,12 +159,15 @@ def get_saml_client(domain: str,
         Optional[Saml2Client]: A Saml2Client or None
     """
     # get_reverse raises an exception if the view is not found, so we can safely ignore type errors
-    acs_url = domain + get_reverse([acs, "acs", "django_saml2_auth:acs"])  # type: ignore
-
     get_user_id_from_saml_response = dictor(settings.SAML2_AUTH,
                                             "TRIGGER.GET_USER_ID_FROM_SAML_RESPONSE")
     if get_user_id_from_saml_response and saml_response:
         user_id = run_hook(get_user_id_from_saml_response, saml_response, user_id)  # type: ignore
+
+    if user_id and not user_id.startswith(settings.REXEL_PLATFORM_URL):
+        acs_url = f"{domain}/api/sso/acs/"
+    else:
+        acs_url = domain + get_reverse([acs, "acs", "django_saml2_auth:acs"])  # type: ignore
 
     metadata = get_metadata(user_id)
     if (metadata and (
@@ -205,7 +208,8 @@ def get_saml_client(domain: str,
         },
     }
 
-    entity_id = saml2_auth_settings.get("ENTITY_ID")
+    get_entity_id = dictor(settings.SAML2_AUTH, "TRIGGER.GET_ENTITY_ID")
+    entity_id = run_hook(get_entity_id, user_id)
     if entity_id:
         saml_settings["entityid"] = entity_id
 
@@ -233,6 +237,7 @@ def get_saml_client(domain: str,
 
     try:
         sp_config = Saml2Config()
+        print(saml_settings)
         sp_config.load(saml_settings)
         saml_client = Saml2Client(config=sp_config)
         return saml_client

@@ -24,7 +24,7 @@ except ImportError:
 from django.views.decorators.csrf import csrf_exempt
 from django_saml2_auth.errors import (INACTIVE_USER, INVALID_NEXT_URL,
                                       INVALID_REQUEST_METHOD, INVALID_TOKEN,
-                                      USER_MISMATCH)
+                                      USER_MISMATCH, NO_USER_ID)
 from django_saml2_auth.exceptions import SAMLAuthError
 from django_saml2_auth.saml import (decode_saml_response,
                                     extract_user_identity, get_assertion_url,
@@ -129,11 +129,11 @@ def acs(request: HttpRequest):
     request.session.flush()
 
     query = f"?token={token}&email={target_user.email}&id={target_user.account_user.id}"
+    get_frontend_url = dictor(saml2_auth_settings, "TRIGGER.GET_FRONTEND_URL")
+    frontend_url = run_hook(get_frontend_url, target_user, next_url, query)
+    print(next_url, query, frontend_url)
 
-    # Use JWT auth to send token to frontend
-    frontend_url = dictor(saml2_auth_settings, "FRONTEND_URL", next_url)
-
-    return HttpResponseRedirect(frontend_url + query)
+    return HttpResponseRedirect(frontend_url)
 
 
 @exception_handler
@@ -220,7 +220,17 @@ def signin(request: HttpRequest) -> HttpResponseRedirect:
 
     request.session["login_next_url"] = next_url
 
-    saml_client = get_saml_client(get_assertion_url(request), acs)
+    user_id = request.META.get("HTTP_REFERER")
+
+    if not user_id:
+        raise SAMLAuthError("Redirection is invalid", extra={
+            "exc_type": ValueError,
+            "error_code": NO_USER_ID,
+            "reason": "Redirection is invalid.",
+            "status_code": 400
+        })
+
+    saml_client = get_saml_client(get_assertion_url(request), acs, user_id=user_id)
     _, info = saml_client.prepare_for_authenticate(relay_state=next_url)  # type: ignore
 
     redirect_url = dict(info["headers"]).get("Location", "")
